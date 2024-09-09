@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s  # Intervalo de coleta
+
+scrape_configs:
+  # Coletando métricas do próprio Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Coletando métricas da máquina com o Node Exporter
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']

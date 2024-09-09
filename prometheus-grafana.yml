@@ -17,9 +17,11 @@ services:
     ports:
       - '3000:3000'
     restart: unless-stopped
+    volumes:
+      - ./grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER={{USER}}
-      - GF_SECURITY_ADMIN_PASSWORD={{PASSWORD}}
+      - GF_SECURITY_ADMIN_USER=${USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${PASSWORD}
   node-exporter:
     image: prom/node-exporter
     container_name: node_exporter
@@ -31,7 +33,7 @@ services:
   #   image: bitnami/mongodb-exporter:latest
   #   container_name: mongodb_exporter
   #   environment:
-  #     - MONGODB_URI={{MONGODB_URI}}
+  #     - MONGODB_URI=${MONGODB_URI}
   #   ports:
   #     - '9216:9216'
   #   restart: unless-stopped

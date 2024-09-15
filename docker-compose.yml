@@ -1,0 +1,126 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v2.11
+    restart: unless-stopped
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --providers.docker=true
+      - --providers.docker.exposedByDefault=false # require containers to define `traefik.enable=true` to be exposed
+      - --api
+      - --certificatesresolvers.letsencryptresolver.acme.email=${EMAIL}
+      - --certificatesresolvers.letsencryptresolver.acme.storage=/acme.json
+      - --certificatesresolvers.letsencryptresolver.acme.tlschallenge=true
+      # prometheus
+      - --metrics.prometheus=true
+      - --metrics.prometheus.addrouterslabels=true
+      - --metrics.prometheus.addserviceslabels=true
+      - --entryPoints.metrics.address=:8082
+      - --metrics.prometheus.entrypoint=metrics
+      - --metrics.prometheus.manualrouting=true
+      # jaeger 
+      - --tracing.jaeger=true
+      - --tracing.jaeger.samplingServerURL=http://jaeger:5778/sampling
+      - --tracing.jaeger.localAgentHostPort=jaeger:6831
+      - --tracing.jaeger.samplingType=const
+      - --tracing.jaeger.samplingParam=1.0 # Taxa de amostragem (1.0 = 100% das requisições)
+      - --tracing.jaeger.traceContextHeaderName=uber-trace-id
+      # Habilitando AccessLog
+      - --accesslog=true
+      - --accesslog.filepath=/logs/access.log # Especifica o arquivo de log
+      - --accesslog.bufferingsize=100 # Tamanho do buffer (opcional)
+
+    ports:
+      - 80:80
+      - 443:443
+      - 8082:8082
+    networks:
+      - traefik-network
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # allow Traefik to listen to Docker events
+      - ${TRAEFIK_DIR}/acme.json:/acme.json # stores ACME (HTTPS) certificates
+      - ./logs:/logs
+    labels:
+      - traefik.enable=true
+
+      # "admin" middleware definition
+      # to be used by services that do not have their own security
+      - traefik.http.middlewares.admin.basicauth.users=${HTTP_BASIC_USER}:${HTTP_BASIC_PWD}
+
+      # expose the traefik dashboard
+      - traefik.http.routers.traefik.entrypoints=websecure
+      - traefik.http.routers.traefik.rule=Host(`traefik.${DOMAINNAME}`)
+      - traefik.http.routers.traefik.service=api@internal
+      - traefik.http.routers.traefik.middlewares=admin
+      - traefik.http.routers.traefik.tls.certresolver=letsencryptresolver
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - traefik-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    volumes:
+      - ./grafana_data:/var/lib/grafana
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_DOMAIN}`)
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+      - traefik.http.routers.grafana.service=grafana
+      - traefik.http.routers.grafana.tls.certresolver=letsencryptresolver
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls=true
+  
+  node-exporter:
+    image: prom/node-exporter
+    container_name: node_exporter
+    networks:
+      - traefik-network
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    restart: unless-stopped
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686" # Porta da interface web do Jaeger
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    networks:
+      - traefik-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.jaeger.rule=Host(`${JAEGER_DOMAIN}`)
+      - traefik.http.routers.jaeger.middlewares=admin
+      - traefik.http.services.jaeger.loadbalancer.server.port=16686
+      - traefik.http.routers.jaeger.service=jaeger
+      - traefik.http.routers.jaeger.tls.certresolver=letsencryptresolver
+      - traefik.http.routers.jaeger.entrypoints=websecure
+      - traefik.http.routers.jaeger.tls=true
+
+networks:
+  traefik-network:
+    external: true
